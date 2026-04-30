@@ -16,7 +16,10 @@
     outline-offset: 2px;
   }
 }
-
+table {
+  table-layout: auto;
+  width: 100%;
+}
 .hero {
   position: relative;
 

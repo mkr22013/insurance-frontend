@@ -154,9 +154,16 @@ export default function App() {
       formData.append("history", JSON.stringify(messages));
 
       const res = await axios.post(`${API_BASE}/chat`, formData);
+      console.log("data received from server : ", res);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: res.data.answer },
+        {
+          role: "assistant",
+          content:
+            typeof res.data.answer === "string"
+              ? res.data.answer
+              : JSON.stringify(res.data.answer),
+        },
       ]);
     } catch (err) {
       setMessages((prev) => [
@@ -194,6 +201,32 @@ export default function App() {
     }
   };
 
+  const safeMessages = messages.map((msg) => {
+    let content = msg.content;
+
+    // 🔥 ensure string
+    if (typeof content !== "string") {
+      try {
+        content = content?.answer || JSON.stringify(content);
+      } catch {
+        content = String(content);
+      }
+    }
+
+    // 🔥 CLEAN JSON STRING IF LEAKED
+    if (content.startsWith("{") && content.includes('"answer"')) {
+      try {
+        const parsed = JSON.parse(content);
+        content = parsed.answer || content;
+      } catch {}
+    }
+
+    // 🔥 FIX escaped newlines
+    content = content.replace(/\\n/g, "\n");
+
+    return { ...msg, content };
+  });
+
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
       {/* --- MAIN CHAT AREA --- */}
@@ -208,7 +241,7 @@ export default function App() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-6 space-y-6">
-          {messages.map((msg, i) => (
+          {safeMessages.map((msg, i) => (
             <div
               key={i}
               className={`flex gap-4 ${msg.role === "user" ? "justify-end" : ""}`}
@@ -228,20 +261,43 @@ export default function App() {
     prose-td:p-3 prose-td:border prose-td:border-slate-200 prose-td:text-slate-700
     overflow-x-auto`}
                 >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {msg.content}
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      table: ({ children }) => (
+                        <table className="w-full border-collapse text-sm">
+                          {children}
+                        </table>
+                      ),
+                      th: ({ children }) => (
+                        <th className="bg-slate-100 font-bold p-3 border border-slate-300 text-left">
+                          {children}
+                        </th>
+                      ),
+                      td: ({ children }) => (
+                        <td className="p-3 border border-slate-200">
+                          {children}
+                        </td>
+                      ),
+                    }}
+                  >
+                    {typeof msg.content === "string"
+                      ? msg.content.replace(/\\n/g, "\n")
+                      : ""}
                   </ReactMarkdown>
                 </div>
 
                 {/* PDF Download Button */}
-                {msg.role === "assistant" && msg.content.includes("|") && (
-                  <button
-                    onClick={() => downloadPDF(msg.content)}
-                    className="mt-6 flex items-center justify-center gap-2 py-3 w-full border-t border-slate-100 text-[10px] font-black text-blue-600 hover:text-blue-800 uppercase tracking-widest transition-colors"
-                  >
-                    <FileDown size={14} /> Download Comparison PDF
-                  </button>
-                )}
+                {msg.role === "assistant" &&
+                  typeof msg.content === "string" &&
+                  msg.content.includes("|") && (
+                    <button
+                      onClick={() => downloadPDF(msg.content)}
+                      className="mt-6 flex items-center justify-center gap-2 py-3 w-full border-t border-slate-100 text-[10px] font-black text-blue-600 hover:text-blue-800 uppercase tracking-widest transition-colors"
+                    >
+                      <FileDown size={14} /> Download Comparison PDF
+                    </button>
+                  )}
               </div>
 
               {msg.role === "user" && (
