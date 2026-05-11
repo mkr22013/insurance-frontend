@@ -235,7 +235,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <Building2 className="text-blue-600" />
             <h1 className="font-bold text-lg tracking-tight">
-              Insurance Policy Assistant
+              Premera Insurance Policy Assistant
             </h1>
           </div>
         </header>
