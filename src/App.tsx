@@ -327,7 +327,7 @@ export default function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder="Compare my 2024 vs 2026 plans..."
+              placeholder="Ask a question..."
               className="flex-1 p-3 bg-slate-100 border border-transparent rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
             />
             <button
