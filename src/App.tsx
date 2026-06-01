@@ -13,7 +13,12 @@ import axios from "axios";
 
 const API_BASE = "http://localhost:8000";
 
-type Message = { role: string; content: string };
+type Message = {
+  role: string;
+  content: string;
+  pages?: number[];
+  source?: string;
+};
 
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -25,17 +30,46 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [streaming, setStreaming] = useState(false);
 
+  // ── Build plan summary bubble from member_info ─────────────────────────────
+  const buildPlanBubble = (info: Record<string, unknown>): string | null => {
+    const plans = info?.plans as
+      | Record<string, Record<string, string>>
+      | undefined;
+    if (!plans) return null;
+
+    const ICONS: Record<string, string> = {
+      medical: "🏥",
+      dental: "🦷",
+      vision: "👁️",
+    };
+    const ORDER = ["medical", "dental", "vision"];
+
+    const lines = ORDER.filter((k) => plans[k])
+      .map(
+        (k) =>
+          `${ICONS[k]} **${k.charAt(0).toUpperCase() + k.slice(1)}** — ${plans[k].plan}`,
+      )
+      .join("\n");
+
+    if (!lines) return null;
+    return `**Your active plans:**\n\n${lines}`;
+  };
+
   // ── On mount: load welcome message + member plan info ──────────────────────
   useEffect(() => {
     const loadWelcome = async () => {
       try {
         const res = await axios.get(`${API_BASE}/welcome`);
-        if (res.data.answer) {
-          setMessages([{ role: "assistant", content: res.data.answer }]);
-        }
+        const msgs: Message[] = [];
         if (res.data.member_info) {
           setMemberInfo(res.data.member_info);
+          const planBubble = buildPlanBubble(res.data.member_info);
+          if (planBubble) msgs.push({ role: "assistant", content: planBubble });
         }
+        if (res.data.answer) {
+          msgs.push({ role: "assistant", content: res.data.answer });
+        }
+        if (msgs.length) setMessages(msgs);
       } catch (err) {
         console.error("Failed to load welcome:", err);
         setMessages([
@@ -134,16 +168,19 @@ export default function App() {
           const memberKey = res.data?.member_key || "";
           const groupNumber = res.data?.group_number || "";
           const confirmMsg = memberKey
-            ? `✅ **Card scanned successfully!**\n\nMember Key: \`${memberKey}\` | Group: \`${groupNumber}\`\n\nYour plan details have been loaded. You can now ask questions about your benefits.`
+            ? `✅ **Card scanned successfully!**\n\nMember Key: \`${memberKey}\` | Group: \`${groupNumber}\``
             : "✅ **Scan Result:**\n\n" + rawText;
 
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content: confirmMsg,
-            },
-          ]);
+          const newMsgs: Message[] = [
+            { role: "assistant", content: confirmMsg },
+          ];
+          if (res.data?.member_info) {
+            const planBubble = buildPlanBubble(res.data.member_info);
+            if (planBubble)
+              newMsgs.push({ role: "assistant", content: planBubble });
+          }
+
+          setMessages((prev) => [...prev, ...newMsgs]);
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Unknown error";
           console.error("[X] API Fetch Failed:", message);
@@ -171,21 +208,20 @@ export default function App() {
         params: { member_key: "DEMO000001", group_number: "1000016" },
       });
       setMemberInfo(res.data);
-      setMessages((prev) => [
-        ...prev,
+      const newMsgs: Message[] = [
         {
           role: "assistant",
           content:
-            "✅ **Demo member loaded.**\n\nMember Key: `DEMO000001` | Group: `1000016`\n\nYou can now ask questions about your benefits.",
+            "✅ **Demo member loaded.** Member Key: `DEMO000001` | Group: `1000016`",
         },
-      ]);
+      ];
+      const planBubble = buildPlanBubble(res.data);
+      if (planBubble) newMsgs.push({ role: "assistant", content: planBubble });
+      setMessages((prev) => [...prev, ...newMsgs]);
     } catch {
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: "⚠️ Failed to load demo member.",
-        },
+        { role: "assistant", content: "⚠️ Failed to load demo member." },
       ]);
     }
   };
@@ -216,7 +252,15 @@ export default function App() {
         setCurrentCategory(res.data.category);
       }
 
-      setMessages((prev) => [...prev, { role: "assistant", content: answer }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: answer,
+          pages: res.data.pages,
+          source: res.data.source,
+        },
+      ]);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -305,7 +349,7 @@ export default function App() {
               )}
 
               <div
-                className={`max-w-4xl p-6 rounded-2xl shadow-sm ${
+                className={`max-w-5xl p-6 rounded-2xl shadow-sm ${
                   msg.role === "user"
                     ? "bg-blue-600 text-white"
                     : "bg-white border border-slate-200"
@@ -333,11 +377,34 @@ export default function App() {
                           {children}
                         </th>
                       ),
-                      td: ({ children }) => (
-                        <td className="p-3 border border-slate-200">
-                          {children}
-                        </td>
-                      ),
+                      td: ({ children }) => {
+                        // Split bullet points into separate lines for readability
+                        const text =
+                          typeof children === "string"
+                            ? children
+                            : Array.isArray(children)
+                              ? children.join("")
+                              : String(children ?? "");
+                        const hasBullets =
+                          text.includes(" • ") || text.includes("• ");
+                        if (hasBullets) {
+                          const parts = text.split(/\s*•\s+/).filter(Boolean);
+                          return (
+                            <td className="p-3 border border-slate-200 align-top">
+                              {parts.map((part, i) => (
+                                <div key={i} className={i > 0 ? "mt-1" : ""}>
+                                  {i > 0 ? `• ${part}` : part}
+                                </div>
+                              ))}
+                            </td>
+                          );
+                        }
+                        return (
+                          <td className="p-3 border border-slate-200">
+                            {children}
+                          </td>
+                        );
+                      },
                     }}
                   >
                     {typeof msg.content === "string"
@@ -356,6 +423,29 @@ export default function App() {
                       <FileDown size={14} /> Download Comparison PDF
                     </button>
                   )}
+
+                {msg.role === "assistant" &&
+                  msg.pages &&
+                  msg.pages.length > 0 &&
+                  msg.source && (
+                    <div className="mt-3 pt-3 border-t border-slate-100 flex items-start gap-2">
+                      <FileDown
+                        size={13}
+                        className="shrink-0 text-blue-400 mt-0.5"
+                      />
+                      <div className="text-[12px] text-slate-500 leading-snug">
+                        <span className="font-semibold text-slate-600">
+                          Referenced from:{" "}
+                        </span>
+                        <span>{msg.source}</span>
+                        <span className="mx-1 text-slate-300">|</span>
+                        <span className="font-medium text-slate-600">
+                          Page{msg.pages.length > 1 ? "s" : ""}{" "}
+                          {msg.pages.join(", ")}
+                        </span>
+                      </div>
+                    </div>
+                  )}
               </div>
 
               {msg.role === "user" && (
@@ -365,12 +455,21 @@ export default function App() {
           ))}
 
           {loading && (
-            <div className="flex gap-4 items-center animate-pulse">
+            <div className="flex gap-4 items-center">
               <Bot className="text-blue-400 shrink-0" />
-              <div className="bg-slate-200 h-10 w-48 rounded-2xl flex items-center px-4">
-                <span className="text-xs font-bold text-slate-500 tracking-widest uppercase">
-                  Analyzing Data...
-                </span>
+              <div className="bg-white border border-slate-200 rounded-2xl px-5 py-4 shadow-sm flex items-center gap-1.5">
+                <span
+                  className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <span
+                  className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "150ms" }}
+                />
+                <span
+                  className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "300ms" }}
+                />
               </div>
             </div>
           )}
@@ -378,8 +477,8 @@ export default function App() {
           <div ref={chatEndRef} />
         </main>
 
-        <footer className="p-4 bg-white border-t border-slate-200">
-          <div className="max-w-3xl mx-auto flex gap-4">
+        <footer className="bg-white border-t border-slate-200 pt-4 pb-2">
+          <div className="max-w-3xl mx-auto flex gap-4 px-4">
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -395,6 +494,11 @@ export default function App() {
               <Send size={20} />
             </button>
           </div>
+          <p className="text-center text-[11px] text-slate-400 mt-2 pb-1">
+            This assistant uses AI and may make mistakes. Always verify benefit
+            details with your official plan documents or contact Premera
+            directly.
+          </p>
         </footer>
       </div>
 
