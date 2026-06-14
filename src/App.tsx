@@ -72,19 +72,19 @@ export default function App({
 
   // ── On mount: load welcome message + member plan info ──────────────────────
   useEffect(() => {
-    const loadWelcome = async () => {
-      // Unauthenticated with no member key — skip API call, show scan prompt only
-      if (!isAuthenticated && !activeMemberKey) {
-        setMessages([
-          {
-            role: "assistant",
-            content:
-              "👋 Hi! I'm your **Premera Insurance Plan Assistant**.\n\nTo get started, please **scan your insurance card** using the scanner on the right, or click **Use Demo Member** to try a demo.",
-          },
-        ]);
-        return;
-      }
+    // Always show basic welcome message on mount
+    if (!isAuthenticated && !activeMemberKey) {
+      setMessages([
+        {
+          role: "assistant",
+          content:
+            "👋 Hi! I'm your **Premera Insurance Plan Assistant**.\n\nScan your insurance card or click **Use Demo Member** to get started.",
+        },
+      ]);
+      return;
+    }
 
+    const loadWelcome = async () => {
       try {
         const params = new URLSearchParams();
         if (activeMemberKey) params.append("member_key", activeMemberKey);
@@ -182,23 +182,35 @@ export default function App({
 
         try {
           const res = await axios.post(`${API_BASE}/scan-card`, formData);
+          let rawText = "No data received";
+          if (res.data?.data) {
+            rawText =
+              typeof res.data.data === "object"
+                ? JSON.stringify(res.data.data, null, 2)
+                : String(res.data.data);
+          }
 
+          // Update member info from scanned card
           if (res.data?.member_info) {
             setMemberInfo(res.data.member_info);
           }
 
-          const newMsgs: Message[] = [];
+          const memberKey = res.data?.member_key || "";
+          const groupNumber = res.data?.group_number || "";
+          const confirmMsg = memberKey
+            ? `✅ **Card scanned successfully!**\n\nMember Key: \`${memberKey}\` | Group: \`${groupNumber}\``
+            : "✅ **Scan Result:**\n\n" + rawText;
+
+          const newMsgs: Message[] = [
+            { role: "assistant", content: confirmMsg },
+          ];
           if (res.data?.member_info) {
             const planBubble = buildPlanBubble(res.data.member_info);
             if (planBubble)
               newMsgs.push({ role: "assistant", content: planBubble });
           }
-          newMsgs.push({
-            role: "assistant",
-            content:
-              '👋 Hi! I\'m your **Premera Insurance Plan Assistant**.\n\nI can answer specific questions about your **Medical**, **Dental**, and **Vision** benefits.\n\nHere are some examples to get you started:\n\n🏥 **Medical** • *"What is my PCP copay?"* • *"How much is an ER visit?"* • *"What is my deductible?"*\n\n🦷 **Dental** • *"How much is a teeth cleaning?"* • *"What does a crown cost?"* • *"What is my dental annual maximum benefit?"*\n\n👁️ **Vision** • *"What is my vision exam copay?"* • *"How much is my glasses allowance?"*\n\nWhat would you like to know?',
-          });
-          setMessages(newMsgs);
+
+          setMessages((prev) => [...prev, ...newMsgs]);
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Unknown error";
           console.error("[X] API Fetch Failed:", message);
@@ -327,16 +339,8 @@ export default function App({
         params: { member_key: "DEMO000001", group_number: "1000016" },
       });
       setMemberInfo(res.data);
-      setCurrentCategory("");
-      const newMsgs: Message[] = [];
-      const planBubble = buildPlanBubble(res.data);
-      if (planBubble) newMsgs.push({ role: "assistant", content: planBubble });
-      newMsgs.push({
-        role: "assistant",
-        content:
-          '👋 Hi! I\'m your **Premera Insurance Plan Assistant**.\n\nI can answer specific questions about your **Medical**, **Dental**, and **Vision** benefits.\n\nHere are some examples to get you started:\n\n🏥 **Medical** • *"What is my PCP copay?"* • *"How much is an ER visit?"* • *"What is my deductible?"*\n\n🦷 **Dental** • *"How much is a teeth cleaning?"* • *"What does a crown cost?"* • *"What is my dental annual maximum benefit?"*\n\n👁️ **Vision** • *"What is my vision exam copay?"* • *"How much is my glasses allowance?"*\n\nWhat would you like to know?',
-      });
-      setMessages(newMsgs);
+      setMessages([]); // clear initial message
+      setActiveMemberKey("DEMO000001"); // triggers loadWelcome via useEffect
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -445,318 +449,329 @@ export default function App({
   });
 
   return (
-    <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
-      {/* ── MAIN CHAT AREA ── */}
-      <div className="flex flex-col flex-1 border-r border-slate-200">
-        <header className="flex items-center justify-between p-4 bg-white border-b border-slate-200 shadow-sm">
-          <div className="flex items-center gap-2">
-            <Building2 className="text-blue-600" />
-            <h1 className="font-bold text-lg tracking-tight">
-              Premera Insurance Policy Assistant
-            </h1>
-          </div>
-
-          {/* Plan switcher — only shown in authenticated mode with multiple keys */}
-          {isAuthenticated && memberKeys.length > 1 && (
+    <div className="flex h-full min-h-0 w-full bg-white font-sans text-slate-900">
+      <div className="flex w-full h-full min-h-0 overflow-hidden">
+        {/* ── MAIN CHAT AREA ── */}
+        <div className="flex flex-col flex-1 border-r border-slate-200">
+          <header className="flex items-center justify-between p-4 bg-white border-b border-slate-200 shadow-sm">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 font-medium">Plan:</span>
-              <select
-                value={activeMemberKey}
-                onChange={(e) => switchPlan(e.target.value)}
-                className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700 font-medium focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
-              >
-                {memberKeys.map((key, i) => (
-                  <option key={key} value={key}>
-                    {key === activeMemberKey
-                      ? (
-                          (memberInfo as Record<string, unknown>)?.plans as
-                            | Record<string, Record<string, string>>
-                            | undefined
-                        )?.[
-                          Object.keys(
-                            ((memberInfo as Record<string, unknown>)
-                              ?.plans as Record<string, unknown>) || {},
-                          )[0]
-                        ]?.group_name || `Plan ${i + 1}`
-                      : `Plan ${i + 1}`}
-                  </option>
-                ))}
-              </select>
+              <Building2 className="text-blue-600" />
+              <h1 className="font-bold text-lg tracking-tight">
+                Premera Insurance Policy Assistant
+              </h1>
             </div>
-          )}
-        </header>
 
-        <main className="flex-1 overflow-y-auto p-6 space-y-6">
-          {safeMessages.map((msg, i) => (
-            <div
-              key={i}
-              className={`flex gap-4 ${msg.role === "user" ? "justify-end" : ""}`}
-            >
-              {msg.role !== "user" && (
-                <Bot className="text-blue-600 mt-1 shrink-0" />
-              )}
+            {/* Plan switcher — only shown in authenticated mode with multiple keys */}
+            {isAuthenticated && memberKeys.length > 1 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-medium">
+                  Plan:
+                </span>
+                <select
+                  value={activeMemberKey}
+                  onChange={(e) => switchPlan(e.target.value)}
+                  className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700 font-medium focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+                >
+                  {memberKeys.map((key, i) => (
+                    <option key={key} value={key}>
+                      {key === activeMemberKey
+                        ? (
+                            (memberInfo as Record<string, unknown>)?.plans as
+                              | Record<string, Record<string, string>>
+                              | undefined
+                          )?.[
+                            Object.keys(
+                              ((memberInfo as Record<string, unknown>)
+                                ?.plans as Record<string, unknown>) || {},
+                            )[0]
+                          ]?.group_name || `Plan ${i + 1}`
+                        : `Plan ${i + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </header>
 
-              <div
-                className={`max-w-5xl p-6 rounded-2xl shadow-sm ${
-                  msg.role === "user"
-                    ? "bg-blue-600 text-white"
-                    : "bg-white border border-slate-200"
-                }`}
-              >
+          <main className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div className="w-full space-y-6">
+              {safeMessages.map((msg, i) => (
                 <div
-                  className={`prose ${
-                    msg.role === "user" ? "prose-invert" : "prose-slate"
-                  } prose-sm max-w-none
+                  key={i}
+                  className={`flex gap-4 ${msg.role === "user" ? "justify-end" : ""}`}
+                >
+                  {msg.role !== "user" && (
+                    <Bot className="text-blue-600 mt-1 shrink-0" />
+                  )}
+
+                  <div
+                    className={`max-w-5xl p-6 rounded-2xl shadow-sm ${
+                      msg.role === "user"
+                        ? "bg-blue-600 text-white"
+                        : "bg-white border border-slate-200"
+                    }`}
+                  >
+                    <div
+                      className={`prose ${
+                        msg.role === "user" ? "prose-invert" : "prose-slate"
+                      } prose-sm max-w-none
                   prose-table:border prose-table:border-slate-300 prose-table:rounded-lg
                   prose-th:bg-slate-100 prose-th:text-slate-900 prose-th:font-bold prose-th:p-3 prose-th:border prose-th:border-slate-300
                   prose-td:p-3 prose-td:border prose-td:border-slate-200 prose-td:text-slate-700
                   overflow-x-auto`}
-                >
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      table: ({ children }) => (
-                        <table className="w-full border-collapse text-sm">
-                          {children}
-                        </table>
-                      ),
-                      th: ({ children }) => (
-                        <th className="bg-slate-100 font-bold p-3 border border-slate-300 text-left">
-                          {children}
-                        </th>
-                      ),
-                      td: ({ children }) => (
-                        <td className="p-3 border border-slate-200">
-                          {children}
-                        </td>
-                      ),
-                    }}
-                  >
-                    {typeof msg.content === "string"
-                      ? msg.content.replace(/\\n/g, "\n")
-                      : ""}
-                  </ReactMarkdown>
-                </div>
-
-                {msg.role === "assistant" &&
-                  typeof msg.content === "string" &&
-                  msg.content.includes("|") && (
-                    <button
-                      onClick={() => downloadPDF(msg.content)}
-                      className="mt-6 flex items-center justify-center gap-2 py-3 w-full border-t border-slate-100 text-[10px] font-black text-blue-600 hover:text-blue-800 uppercase tracking-widest transition-colors"
                     >
-                      <FileDown size={14} /> Download Comparison PDF
-                    </button>
-                  )}
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          table: ({ children }) => (
+                            <table className="w-full border-collapse text-sm">
+                              {children}
+                            </table>
+                          ),
+                          th: ({ children }) => (
+                            <th className="bg-slate-100 font-bold p-3 border border-slate-300 text-left">
+                              {children}
+                            </th>
+                          ),
+                          td: ({ children }) => (
+                            <td className="p-3 border border-slate-200">
+                              {children}
+                            </td>
+                          ),
+                        }}
+                      >
+                        {typeof msg.content === "string"
+                          ? msg.content.replace(/\\n/g, "\n")
+                          : ""}
+                      </ReactMarkdown>
+                    </div>
 
-                {msg.role === "assistant" &&
-                  msg.pages &&
-                  msg.pages.length > 0 &&
-                  msg.source && (
-                    <div className="mt-3 pt-3 border-t border-slate-100 flex items-start gap-2">
-                      <FileDown
-                        size={13}
-                        className="shrink-0 text-blue-400 mt-0.5"
+                    {msg.role === "assistant" &&
+                      typeof msg.content === "string" &&
+                      msg.content.includes("|") && (
+                        <button
+                          onClick={() => downloadPDF(msg.content)}
+                          className="mt-6 flex items-center justify-center gap-2 py-3 w-full border-t border-slate-100 text-[10px] font-black text-blue-600 hover:text-blue-800 uppercase tracking-widest transition-colors"
+                        >
+                          <FileDown size={14} /> Download Comparison PDF
+                        </button>
+                      )}
+
+                    {msg.role === "assistant" &&
+                      msg.pages &&
+                      msg.pages.length > 0 &&
+                      msg.source && (
+                        <div className="mt-3 pt-3 border-t border-slate-100 flex items-start gap-2">
+                          <FileDown
+                            size={13}
+                            className="shrink-0 text-blue-400 mt-0.5"
+                          />
+                          <div className="text-[12px] text-slate-500 leading-snug">
+                            <span className="font-semibold text-slate-600">
+                              Referenced from:{" "}
+                            </span>
+                            <span>{msg.source}</span>
+                            <span className="mx-1 text-slate-300">|</span>
+                            <span className="font-medium text-slate-600">
+                              Page{msg.pages.length > 1 ? "s" : ""}{" "}
+                              {msg.pages.join(", ")}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                  </div>
+
+                  {msg.role === "user" && (
+                    <UserCircle className="text-slate-400 mt-1 shrink-0" />
+                  )}
+                </div>
+              ))}
+
+              {loading && (
+                <div className="flex gap-4 items-center">
+                  <Bot className="text-blue-400 shrink-0" />
+                  <div className="bg-white border border-slate-200 rounded-2xl px-5 py-4 shadow-sm flex items-center gap-1.5">
+                    <span
+                      className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"
+                      style={{ animationDelay: "0ms" }}
+                    />
+                    <span
+                      className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"
+                      style={{ animationDelay: "150ms" }}
+                    />
+                    <span
+                      className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"
+                      style={{ animationDelay: "300ms" }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div ref={chatEndRef} />
+            </div>
+          </main>
+
+          <footer className="bg-white border-t border-slate-200 pt-4 pb-2">
+            <div className="w-full flex justify-center px-4">
+              <div className="w-1/3 flex gap-4">
+                <input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && !loading && handleSend()
+                  }
+                  placeholder="Ask a question about your benefits..."
+                  className="flex-1 p-3 bg-slate-100 border border-transparent rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={loading}
+                  className="bg-blue-600 text-white p-3 rounded-xl hover:bg-blue-700 transition-colors shadow-lg disabled:opacity-50"
+                >
+                  <Send size={20} />
+                </button>
+              </div>
+            </div>
+            <p className="text-center text-[11px] text-slate-400 mt-2 pb-1">
+              This assistant uses AI and may make mistakes. Always verify
+              benefit details with your official plan documents or contact
+              Premera directly.
+            </p>
+          </footer>
+        </div>
+
+        {/* ── RIGHT SIDEBAR ── */}
+        <aside className="w-80 bg-white p-6 hidden lg:block border-l border-slate-200">
+          <div className="space-y-6 sticky top-6">
+            {isAuthenticated ? (
+              /* ── Authenticated: Check Dependent ── */
+              <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 shadow-sm">
+                <h2 className="flex items-center gap-2 font-bold text-blue-900 mb-1">
+                  <Camera size={18} /> Check Dependent Benefits
+                </h2>
+                <p className="text-[11px] text-blue-600 mb-4 leading-relaxed">
+                  Scan a dependent's insurance card to view their benefit
+                  details.
+                </p>
+
+                <div className="aspect-square bg-slate-900 rounded-xl mb-4 overflow-hidden flex items-center justify-center border-2 border-slate-200 shadow-inner">
+                  {streaming ? (
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      className="w-full h-full object-cover scale-x-[-1]"
+                    />
+                  ) : (
+                    <div className="text-center p-4">
+                      <Camera
+                        className="text-slate-700 mx-auto mb-2 opacity-20"
+                        size={48}
                       />
-                      <div className="text-[12px] text-slate-500 leading-snug">
-                        <span className="font-semibold text-slate-600">
-                          Referenced from:{" "}
-                        </span>
-                        <span>{msg.source}</span>
-                        <span className="mx-1 text-slate-300">|</span>
-                        <span className="font-medium text-slate-600">
-                          Page{msg.pages.length > 1 ? "s" : ""}{" "}
-                          {msg.pages.join(", ")}
-                        </span>
-                      </div>
+                      <p className="text-[10px] text-slate-500 font-medium">
+                        Camera Offline
+                      </p>
                     </div>
                   )}
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={toggleCamera}
+                    className={`w-full py-3 rounded-xl text-sm font-bold transition-all shadow-md ${
+                      streaming
+                        ? "bg-slate-800 text-white hover:bg-slate-900"
+                        : "bg-white text-slate-800 border border-slate-200 hover:bg-slate-50"
+                    }`}
+                  >
+                    {streaming ? "Stop Camera" : "Open Camera"}
+                  </button>
+                  {streaming && (
+                    <button
+                      onClick={scanDependentCard}
+                      disabled={loading}
+                      className="w-full py-3 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-2"
+                    >
+                      {loading ? "Validating..." : "Scan Dependent Card"}
+                    </button>
+                  )}
+                </div>
               </div>
+            ) : (
+              /* ── Unauthenticated: Full Vision Scanner ── */
+              <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 shadow-sm">
+                <h2 className="flex items-center gap-2 font-bold text-blue-900 mb-2">
+                  <Camera size={18} /> Vision Scanner
+                </h2>
+                <p className="text-[10px] text-blue-600 mb-4 uppercase font-bold tracking-wider">
+                  Llama 3.2-Vision Active
+                </p>
 
-              {msg.role === "user" && (
-                <UserCircle className="text-slate-400 mt-1 shrink-0" />
-              )}
-            </div>
-          ))}
+                <div className="aspect-square bg-slate-900 rounded-xl mb-4 overflow-hidden flex items-center justify-center border-2 border-slate-200 shadow-inner">
+                  {streaming ? (
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      className="w-full h-full object-cover scale-x-[-1]"
+                    />
+                  ) : (
+                    <div className="text-center p-4">
+                      <Camera
+                        className="text-slate-700 mx-auto mb-2 opacity-20"
+                        size={48}
+                      />
+                      <p className="text-[10px] text-slate-500 font-medium">
+                        Camera Offline
+                      </p>
+                    </div>
+                  )}
+                </div>
 
-          {loading && (
-            <div className="flex gap-4 items-center">
-              <Bot className="text-blue-400 shrink-0" />
-              <div className="bg-white border border-slate-200 rounded-2xl px-5 py-4 shadow-sm flex items-center gap-1.5">
-                <span
-                  className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "0ms" }}
-                />
-                <span
-                  className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "150ms" }}
-                />
-                <span
-                  className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "300ms" }}
-                />
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={toggleCamera}
+                    className={`w-full py-3 rounded-xl text-sm font-bold transition-all shadow-md ${
+                      streaming
+                        ? "bg-slate-800 text-white hover:bg-slate-900"
+                        : "bg-white text-slate-800 border border-slate-200 hover:bg-slate-50"
+                    }`}
+                  >
+                    {streaming ? "Stop Camera" : "Open Camera"}
+                  </button>
+                  {streaming && (
+                    <button
+                      onClick={scanCard}
+                      disabled={loading}
+                      className="w-full py-3 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-2"
+                    >
+                      {loading ? "Processing..." : "Capture & Scan Card"}
+                    </button>
+                  )}
+                  <button
+                    onClick={loadDemoMember}
+                    disabled={loading}
+                    className="w-full py-2 bg-slate-100 text-slate-600 text-xs font-bold rounded-xl hover:bg-slate-200 transition-all border border-slate-200"
+                  >
+                    Use Demo Member
+                  </button>
+                </div>
               </div>
+            )}
+
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
+                Quick Tip
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {isAuthenticated
+                  ? "Scan a dependent's card to check their specific benefit details and coverage."
+                  : "Position your insurance card clearly within the frame. Our AI will automatically detect the Carrier, Plan Year, and Member Tier."}
+              </p>
             </div>
-          )}
-
-          <div ref={chatEndRef} />
-        </main>
-
-        <footer className="bg-white border-t border-slate-200 pt-4 pb-2">
-          <div className="max-w-3xl mx-auto flex gap-4 px-4">
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !loading && handleSend()}
-              placeholder="Ask a question about your benefits..."
-              className="flex-1 p-3 bg-slate-100 border border-transparent rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-            />
-            <button
-              onClick={handleSend}
-              disabled={loading}
-              className="bg-blue-600 text-white p-3 rounded-xl hover:bg-blue-700 transition-colors shadow-lg disabled:opacity-50"
-            >
-              <Send size={20} />
-            </button>
           </div>
-          <p className="text-center text-[11px] text-slate-400 mt-2 pb-1">
-            This assistant uses AI and may make mistakes. Always verify benefit
-            details with your official plan documents or contact Premera
-            directly.
-          </p>
-        </footer>
+        </aside>
       </div>
-
-      {/* ── RIGHT SIDEBAR ── */}
-      <aside className="w-80 bg-white p-6 hidden lg:block border-l border-slate-200">
-        <div className="space-y-6 sticky top-6">
-          {isAuthenticated ? (
-            /* ── Authenticated: Check Dependent ── */
-            <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 shadow-sm">
-              <h2 className="flex items-center gap-2 font-bold text-blue-900 mb-1">
-                <Camera size={18} /> Check Dependent Benefits
-              </h2>
-              <p className="text-[11px] text-blue-600 mb-4 leading-relaxed">
-                Scan a dependent's insurance card to view their benefit details.
-              </p>
-
-              <div className="aspect-square bg-slate-900 rounded-xl mb-4 overflow-hidden flex items-center justify-center border-2 border-slate-200 shadow-inner">
-                {streaming ? (
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    className="w-full h-full object-cover scale-x-[-1]"
-                  />
-                ) : (
-                  <div className="text-center p-4">
-                    <Camera
-                      className="text-slate-700 mx-auto mb-2 opacity-20"
-                      size={48}
-                    />
-                    <p className="text-[10px] text-slate-500 font-medium">
-                      Camera Offline
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={toggleCamera}
-                  className={`w-full py-3 rounded-xl text-sm font-bold transition-all shadow-md ${
-                    streaming
-                      ? "bg-slate-800 text-white hover:bg-slate-900"
-                      : "bg-white text-slate-800 border border-slate-200 hover:bg-slate-50"
-                  }`}
-                >
-                  {streaming ? "Stop Camera" : "Open Camera"}
-                </button>
-                {streaming && (
-                  <button
-                    onClick={scanDependentCard}
-                    disabled={loading}
-                    className="w-full py-3 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-2"
-                  >
-                    {loading ? "Validating..." : "Scan Dependent Card"}
-                  </button>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* ── Unauthenticated: Full Vision Scanner ── */
-            <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 shadow-sm">
-              <h2 className="flex items-center gap-2 font-bold text-blue-900 mb-2">
-                <Camera size={18} /> Vision Scanner
-              </h2>
-              <p className="text-[10px] text-blue-600 mb-4 uppercase font-bold tracking-wider">
-                Llama 3.2-Vision Active
-              </p>
-
-              <div className="aspect-square bg-slate-900 rounded-xl mb-4 overflow-hidden flex items-center justify-center border-2 border-slate-200 shadow-inner">
-                {streaming ? (
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    className="w-full h-full object-cover scale-x-[-1]"
-                  />
-                ) : (
-                  <div className="text-center p-4">
-                    <Camera
-                      className="text-slate-700 mx-auto mb-2 opacity-20"
-                      size={48}
-                    />
-                    <p className="text-[10px] text-slate-500 font-medium">
-                      Camera Offline
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={toggleCamera}
-                  className={`w-full py-3 rounded-xl text-sm font-bold transition-all shadow-md ${
-                    streaming
-                      ? "bg-slate-800 text-white hover:bg-slate-900"
-                      : "bg-white text-slate-800 border border-slate-200 hover:bg-slate-50"
-                  }`}
-                >
-                  {streaming ? "Stop Camera" : "Open Camera"}
-                </button>
-                {streaming && (
-                  <button
-                    onClick={scanCard}
-                    disabled={loading}
-                    className="w-full py-3 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-2"
-                  >
-                    {loading ? "Processing..." : "Capture & Scan Card"}
-                  </button>
-                )}
-                <button
-                  onClick={loadDemoMember}
-                  disabled={loading}
-                  className="w-full py-2 bg-slate-100 text-slate-600 text-xs font-bold rounded-xl hover:bg-slate-200 transition-all border border-slate-200"
-                >
-                  Use Demo Member
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
-              Quick Tip
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              {isAuthenticated
-                ? "Scan a dependent's card to check their specific benefit details and coverage."
-                : "Position your insurance card clearly within the frame. Our AI will automatically detect the Carrier, Plan Year, and Member Tier."}
-            </p>
-          </div>
-        </div>
-      </aside>
     </div>
   );
 }
