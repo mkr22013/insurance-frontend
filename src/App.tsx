@@ -556,7 +556,7 @@ export default function App({
 
                 {msg.role === "assistant" &&
                   msg.source &&
-                  (msg.pages?.length > 0 ||
+                  (msg.pages && msg.pages?.length > 0 ||
                     msg.source.includes("||") ||
                     msg.source.includes("Pages")) && (
                     <div className="mt-3 pt-3 border-t border-slate-100 flex items-start gap-2">
@@ -584,7 +584,7 @@ export default function App({
                           // Regular single-source with pages array
                           <>
                             <span>{msg.source}</span>
-                            {msg.pages && msg.pages.length > 0 && (
+                            {msg && msg.pages && msg.pages.length > 0 && (
                               <>
                                 <span className="mx-1 text-slate-300">|</span>
                                 <span className="font-medium text-slate-600">
